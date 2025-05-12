@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import React, { useEffect, useState, useCallback } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { Line, Bar } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -14,6 +14,7 @@ import {
   Legend,
 } from 'chart.js';
 import styles from './Dashboard.module.css';
+import emailjs from '@emailjs/browser';
 
 ChartJS.register(
   CategoryScale,
@@ -26,9 +27,7 @@ ChartJS.register(
   Legend
 );
 
-const supabaseUrl = 'https://zgeyiibklawawnycftcj.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnZXlpaWJrbGF3YXdueWNmdGNqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0MTczNTk3OCwiZXhwIjoyMDU3MzExOTc4fQ.7E3_tHVeIxPE3tQWcU26K1jx7cYsyUzWwvfHNpeMGi4';
-const supabase = createClient(supabaseUrl, supabaseKey);
+
 
 const formatCorrectTime = (timestamp) => {
   if (!timestamp) return '--:--';
@@ -48,10 +47,16 @@ const Dashboard = () => {
   const [sensorData, setSensorData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [userName, setUserName] = useState(localStorage.getItem('userName') || 'Visitante');
-  const [fileCount, setFileCount] = useState(0);
-  const [peopleCount, setPeopleCount] = useState(localStorage.getItem('peopleCount') || 1);
+  const [userEmail,setEmail] = useState([]);
+  const [userName, setUserName] = useState('Visitante');
+  const [Nos, setNos] = useState(1);
+  const [isOpen, setIsOpen] = useState(true); // <-- AQUI o estado da sidebar
   const navigate = useNavigate();
+
+  const toggleSidebar = () => {
+    setIsOpen((prev) => !prev);
+  };
+
 
   const [chartData, setChartData] = useState({
     mainChart: {
@@ -125,7 +130,7 @@ const Dashboard = () => {
     },
   };
 
-  const fetchSensorData = async () => {
+  const fetchSensorData = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('sensor_data')
@@ -138,11 +143,23 @@ const Dashboard = () => {
       setSensorData(data || []);
       
       if (data && data.length > 0) {
+        const latestTemp = data[0].temperatura;
+
+      if (latestTemp > 45) {
+        sendEmailAlert(latestTemp);
+        sendSmsAlert(latestTemp);
+      }
+
         const reversedData = [...data].reverse();
         
         const temps = reversedData.map(item => item.temperatura);
         const humids = reversedData.map(item => item.umidade);
-        const airQualities = reversedData.map(item => item.qualidade_do_ar);
+        const airQualities = reversedData.map(item => {
+          const ppm = item.qualidade_do_ar;
+          const percent = Math.max(0, Math.min(100, 100 - (ppm / 1000) * 100));
+          return parseFloat(percent.toFixed(1));
+        });
+        
         
         const labels = reversedData.map(item => {
           const date = new Date(item.timestamp);
@@ -155,21 +172,21 @@ const Dashboard = () => {
           return `${horas.toString().padStart(2, "0")}:${minutos}h`;
         });
 
-        setChartData({
+        setChartData(prevData => ({
           mainChart: {
             labels,
             datasets: [
-              { ...chartData.mainChart.datasets[0], data: temps },
-              { ...chartData.mainChart.datasets[1], data: humids }
+              { ...prevData.mainChart.datasets[0], data: temps },
+              { ...prevData.mainChart.datasets[1], data: humids }
             ]
           },
           lineChart: {
             labels,
             datasets: [
-              { ...chartData.lineChart.datasets[0], data: airQualities }
+              { ...prevData.lineChart.datasets[0], data: airQualities }
             ]
           }
-        });
+        }));
       }
 
       setLoading(false);
@@ -177,52 +194,107 @@ const Dashboard = () => {
       setError(err.message);
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchUserData = async () => {
     try {
-      const email = localStorage.getItem('userEmail');
-      if (email) {
-        const response = await fetch('http://localhost:5000/user', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email })
-        });
-        
-        if (response.ok) {
-          const userData = await response.json();
-          setUserName(userData.name);
-          localStorage.setItem('userName', userData.name);
-          if (userData.peopleCount) {
-            setPeopleCount(userData.peopleCount);
-            localStorage.setItem('peopleCount', userData.peopleCount);
-          }
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+  
+      if (userError) {
+        console.error('Erro ao obter usuário logado:', userError.message);
+        return;
+      }
+
+      const email = userData?.user?.email;
+    if (!email) {
+      console.error('Email não encontrado');
+      return;
+    }
+  
+      if (userEmail) {
+        const { data, error } = await supabase
+          .from('usuarios') // nome da sua tabela
+          .select('nome, nos')
+          .eq('email', email)
+          .single();
+  
+        if (error) {
+          console.error('Erro ao buscar dados do usuário:', error.message);
+        } else {
+          setUserEmail(email);
+          if (data.nome) setUserName(data.nome);
+          if (data.nos !== undefined) setNos(data.nos);
         }
       }
     } catch (err) {
       console.error('Erro ao buscar dados do usuário:', err);
     }
   };
+    
+    const sendEmailAlert = async (temperatura) => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+    
+        if (!userEmail) {
+          console.warn('Usuário não autenticado ou e-mail não encontrado.');
+          return;
+        }
+    
+        await emailjs.send('service_zkcfc1t', 'template_uwhj73q', {
+          user_email: userEmail,
+          temperatura: temperatura,
+        }, 'WFHqHr8QIonRw_wfu');
+    
+        console.log('Email enviado!');
+      } catch (error) {
+        console.error('Erro ao enviar e-mail:', error);
+      }
+    };
 
-  const fetchFileCount = async () => {
-    try {
-      const mockFileCount = { count: 1 };
-      setFileCount(mockFileCount.count);
-    } catch (err) {
-      console.error('Erro ao buscar contagem de arquivos:', err);
+    const sendSmsAlert = async (temperatura) => {
+      const accountSid = ['AC0f6a89f', 'af28ca8741ef350f0b665344a'].join('');
+      const authToken = ['89f3d90a', '36ad6260c7ea1299f8a9e48c'].join('');
+
+
+      const fromNumber = '+18646681236'; // Ex: +1415XXXXXXX
+      const toNumber = '+5571999176961';  // Ex: +55SEUNUMEROBRASIL
+    
+      const body = `Alerta! Temperatura muito alta: ${temperatura}°C.`;
+    
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+    
+      const formData = new FormData();
+  formData.append('From', fromNumber);
+  formData.append('To', toNumber);
+  formData.append('Body', body);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(accountSid + ':' + authToken),
+      },
+      body: formData
+    });
+
+    if (response.ok) {
+      console.log('SMS enviado com sucesso!');
+    } else {
+      console.error('Erro ao enviar SMS:', await response.text());
     }
-  };
+  } catch (error) {
+    console.error('Erro na requisição:', error);
+      }
+    };
+    
 
   useEffect(() => {
     fetchSensorData();
     fetchUserData();
-    fetchFileCount();
 
     const interval = setInterval(fetchSensorData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchSensorData]);
 
   if (loading) return <div className={styles.loading}>Carregando...</div>;
   if (error) return <div className={styles.error}>Erro: {error}</div>;
@@ -232,7 +304,10 @@ const Dashboard = () => {
 
   return (
     <div className={styles.dashboardWrapper}>
-      <aside className={styles.sidebar}>
+       
+
+        {/* Sidebar */}
+       <aside className={`${styles.sidebar} ${isOpen ? styles.open : styles.closed}`}>
         <div className={styles.sidebarHeader}>
           <img
             className={styles.userImage}
@@ -267,53 +342,54 @@ const Dashboard = () => {
             <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer">Mapa</a>
           </li>
         </ul>
-      </aside>
 
-      <section className={styles.mainContent}>
-        <nav className={styles.navbar}>
-          <div className={styles.navbarBrand}>
-            <img src="/Green_Fire_Alert.png" alt="Logo" className={styles.logo} />
-            <h4>Green Fire Alert</h4>
-          </div>
-          <div className={styles.navbarMenu}>
-            <ul className={styles.navItems}>
-              <li className={styles.navItemDropdown}>
-                <button className={styles.navLinkDropdown}>
-                  Menu <i className="uil uil-angle-down"></i>
-                </button>
-                <ul className={styles.dropdownMenu}>
-                  <li>
-                    <button onClick={() => navigate('/settings')}>
-                      <i className="uil uil-user-circle"></i> Minha Conta
-                    </button>
-                  </li>
-                  <li>
-                    <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer">
-                      <i className="uil uil-envelope"></i> Mensagens
-                    </a>
-                  </li>
-                  <li className={styles.divider}></li>
-                  <li>
-                    <button>
-                      <i className="uil uil-sign-out-alt"></i> Desconectar
-                    </button>
-                  </li>
-                </ul>
-              </li>
-              <li className={styles.navItem}>
-                <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer" className={styles.navLink}>
-                  <i className="uil uil-comment-alt"></i>
-                </a>
-              </li>
-              <li className={styles.navItem}>
-                <button className={styles.navLink}>
-                  <i className="uil uil-bell"></i>
-                  <span>0</span>
-                </button>
-              </li>
-            </ul>
-          </div>
-        </nav>
+      </aside>
+      <section className={`${styles.mainContent} ${isOpen ? styles.sidebarOpen : styles.sidebarClosed}`}>
+      <nav className={styles.navbar}>
+      <i className={`uil uil-bars ${styles.toggleButton}`} onClick={toggleSidebar} title={isOpen ? 'Fechar Sidebar' : 'Abrir Sidebar'}></i>
+  <div className={styles.navbarBrand}>
+    <img src="/Green_Fire_Alert.png" alt="Logo" className={styles.logo} />
+    <h4>Green Fire Alert</h4>
+  </div>
+  <div className={styles.navbarMenu}>
+    <ul className={styles.navItems}>
+      <li className={styles.navItemDropdown}>
+        <button className={styles.navLinkDropdown}>
+          Menu <i className="uil uil-angle-down"></i>
+        </button>
+        <ul className={styles.dropdownMenu}>
+          <li>
+            <button onClick={() => navigate('/settings')}>
+              <i className="uil uil-user-circle"></i> Minha Conta
+            </button>
+          </li>
+          <li>
+            <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer">
+              <i className="uil uil-envelope"></i> Mensagens
+            </a>
+          </li>
+          <li className={styles.divider}></li>
+          <li>
+          <button onClick={() => navigate('/login')}>
+              <i className="uil uil-sign-out-alt"></i> Desconectar
+            </button>
+          </li>
+        </ul>
+      </li>
+      <li className={styles.navItem}>
+        <a href="https://mail.google.com" target="_blank" rel="noopener noreferrer" className={styles.navLink}>
+          <i className="uil uil-comment-alt"></i>
+        </a>
+      </li>
+      <li className={styles.navItem}>
+        <button className={styles.navLink}>
+          <i className="uil uil-bell"></i>
+          <span>0</span>
+        </button>
+      </li>
+    </ul>
+  </div>
+</nav>
 
         <div className={styles.dashboardContent}>
           <div className={styles.welcomeBanner}>
@@ -335,7 +411,11 @@ const Dashboard = () => {
               </div>
               <div className={styles.statCard}>
                 <i className="uil uil-wind"></i>
-                <h3>{latestData.qualidade_do_ar || '--'}%</h3>
+                <h3>
+                {latestData.qualidade_do_ar !== undefined
+                ? `${parseFloat(Math.max(0, Math.min(100, 100 - (latestData.qualidade_do_ar / 1000) * 100)).toFixed(1))}%`
+                : '--'}
+                </h3>
                 <p>Qualidade do ar</p>
               </div>
               <div className={styles.statCard}>
@@ -376,17 +456,17 @@ const Dashboard = () => {
               <div className={styles.statBox}>
                 <i className="uil uil-server-network"></i>
                 <div>
-                  <h3>{fileCount}</h3>
+                  <h3>{Nos}</h3>
                   <span>Nós</span>
                   <p>Nós de comunicação ativos</p>
                 </div>
               </div>
               <div className={styles.statBox}>
-                <i className="uil uil-users-alt"></i>
+                <i className="uil uil-lightbulb-alt"></i>
                 <div>
-                  <h3>{peopleCount}</h3>
-                  <span>Pessoas</span>
-                  <p>Na residência</p>
+                  <h3>133</h3>
+                  <span>Dias</span>
+                  <p>Sem alertas</p>
                 </div>
               </div>
             </div>
