@@ -1,6 +1,14 @@
+:root {
+  --sidebar-width: 250px;
+  --navbar-height: 70px;
+  --primary-color: rgb(0, 97, 8);
+  --secondary-color: #343a40;
+}
+
 .dashboardWrapper {
   display: flex;
   min-height: 100vh;
+  width: 100%;
   background-color: #f8f9fa;
   font-family: 'Open Sans', sans-serif;
 }
@@ -9,14 +17,45 @@
   width: 250px;
   background-color: #343a40;
   color: white;
-  position: fixed;
+  position: fixed; 
   top: 0;
   left: 0;
   height: 100vh;
   overflow-y: auto;
   transition: all 0.3s;
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
 }
+
+.open {
+  width: 250px;
+}
+
+.closed {
+  width: 0px; /* ou 0px se quiser esconder total */
+}
+
+.toggleButton {
+  position: relative;
+  margin-right: -400px; 
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 10px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+/* Conteúdo principal */
+.mainContent {
+  flex-grow: 1;
+  transition: margin-left 0.3s ease;
+  background-color: #f8f9fa;
+  min-height: 100vh;
+}
+
+
 
 .sidebarHeader {
   padding: 20px;
@@ -66,7 +105,7 @@
 }
 
 .menuItem:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgb(243, 243, 243);
 }
 
 .menuItem i {
@@ -92,13 +131,12 @@
 }
 
 .mainContent {
-  margin-left: 250px;
   width: calc(100% - 250px);
   min-height: 100vh;
 }
 
 .navbar {
-  background-color: white;
+  background-color: rgb(0, 97, 8);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   padding: 15px 20px;
   display: flex;
@@ -115,7 +153,7 @@
 }
 
 .logo {
-  width: 40px;
+  width: 80px;
   height: auto;
   margin-right: 10px;
 }
@@ -123,7 +161,7 @@
 .navbarBrand h4 {
   margin: 0;
   font-size: 1.2rem;
-  color: #343a40;
+  color: #ececec;
   font-weight: bold;
 }
 
@@ -141,7 +179,7 @@
 }
 
 .navLink {
-  color: #343a40;
+  color: #e2e2e2;
   text-decoration: none;
   font-size: 1.1rem;
   display: flex;
@@ -178,7 +216,7 @@
 }
 
 .navLinkDropdown {
-  color: #343a40;
+  color: #eeeeee;
   background: none;
   border: none;
   font-size: 0.9rem;
@@ -191,7 +229,7 @@
 }
 
 .navLinkDropdown:hover {
-  background-color: #f8f9fa;
+  background-color: #7e7e7e;
 }
 
 .navLinkDropdown i {
@@ -465,18 +503,19 @@
 }
 
 @media (max-width: 768px) {
-  .sidebar {
-    width: 100%;
-    height: auto;
-    position: relative;
-  }
-  
-  .mainContent {
-    margin-left: 0;
-    width: 100%;
-  }
-  
   .statCard, .statBox {
     width: 100%;
+  }
+}
+
+.chartWrapper {
+  position: relative;
+  height: 250px;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .chartWrapper {
+    height: 200px;
   }
 }
